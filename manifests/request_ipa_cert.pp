@@ -1,7 +1,7 @@
 # Request a new certificate from IPA using certmonger
 #
 # Parameters:
-#   $dbname           - required for nss, unused for openssl. The directory 
+#   $dbname           - required for nss, unused for openssl. The directory
 #                       to store the db
 #   $seclib,          - required - select nss or openssl
 #   $principal        - required - the IPA principal to associate the
@@ -53,6 +53,7 @@ define certmonger::request_ipa_cert (
   $basedir = '/etc/pki',
   $owner_id = undef,
   $group_id = undef,
+  $mode = undef,
   $hostname = undef
 ) {
   include certmonger::server
@@ -84,37 +85,53 @@ define certmonger::request_ipa_cert (
   }
   elsif $seclib == 'openssl' {
 
-      $options = "-k ${key} -f ${cert}"
-      $unless = "/usr/bin/getcert list -f ${cert}"
+    $options = "-k ${key} -f ${cert}"
+    $unless = "/usr/bin/getcert list -f ${cert}"
 
-      exec {"get_cert_openssl_${title}":
-        command => "/usr/bin/ipa-getcert request ${options} -K ${principal} ${subject}",
-        onlyif  => "${onlyif}",
-        unless  => "${unless}",
-        require => [
-            Service['certmonger'],
-        ],
-        notify => Exec["wait_for_certmonger_${title}"],
-      }
+    exec {"get_cert_openssl_${title}":
+      command => "/usr/bin/ipa-getcert request ${options} -K ${principal} ${subject}",
+      onlyif  => "${onlyif}",
+      unless  => "${unless}",
+      require => [
+        Service['certmonger'],
+      ],
+      notify => Exec["wait_for_certmonger_${title}"],
+    }
 
-      # We need certmonger to finish creating the key before we
-      # can proceed. Use onlyif as a way to execute multiple
-      # commands without restorting to shipping a shell script.
-      # This will call getcert to check the status of our cert
-      # 5 times. This doesn't short circuit though, so all 5 will
-      # always run, causing a 5-second delay.
-      exec {"wait_for_certmonger_${title}":
-        command => "true",
-        onlyif => [
-          "sleep 1 && getcert list -f ${cert}",
-          "sleep 1 && getcert list -f ${cert}",
-          "sleep 1 && getcert list -f ${cert}",
-          "sleep 1 && getcert list -f ${cert}",
-          "sleep 1 && getcert list -f ${cert}",
-        ],
-        path => "/usr/bin:/bin",
-        refreshonly => true,
-      }
+    # We need certmonger to finish creating the key before we
+    # can proceed. Use onlyif as a way to execute multiple
+    # commands without restorting to shipping a shell script.
+    # This will call getcert to check the status of our cert
+    # 5 times. This doesn't short circuit though, so all 5 will
+    # always run, causing a 5-second delay.
+    exec {"wait_for_certmonger_${title}":
+      command => "true",
+      onlyif => [
+        "sleep 1 && getcert list -f ${cert}",
+        "sleep 1 && getcert list -f ${cert}",
+        "sleep 1 && getcert list -f ${cert}",
+        "sleep 1 && getcert list -f ${cert}",
+        "sleep 1 && getcert list -f ${cert}",
+      ],
+      path => "/usr/bin:/bin",
+      refreshonly => true,
+    }
+
+    file { $cert:
+      ensure  => present,
+      mode    => $mode,
+      owner   => $owner_id,
+      group   => $group_id,
+      require => Exec["wait_for_certmonger_${title}"],
+    }
+
+    file { $key:
+      ensure  => present,
+      mode    => $mode,
+      owner   => $owner_id,
+      group   => $group_id,
+      require => Exec["wait_for_certmonger_${title}"],
+    }
   } else {
     fail("Unrecognized security library: ${seclib}")
   }
